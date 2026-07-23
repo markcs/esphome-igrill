@@ -292,16 +292,33 @@ void IGrill::read_temperature_(uint8_t *raw_value, uint16_t value_len, int probe
 }
 
 void IGrill::read_threshold_(uint8_t *raw_value, uint16_t value_len, int probe) {
-  uint16_t raw_threshold = (raw_value[1] << 8) | raw_value[0];
-  ESP_LOGV(TAG, "Parsing threshold from probe %d, raw value %d", probe, raw_threshold);
+  std::string hex_bytes;
+  char byte_str[4];
+  for (uint16_t i = 0; i < value_len; i++) {
+    snprintf(byte_str, sizeof(byte_str), "%02X ", raw_value[i]);
+    hex_bytes += byte_str;
+  }
+  if (value_len < 4) {
+    ESP_LOGW(TAG, "Threshold char for probe %d returned only %d bytes (expected 4), raw bytes: %s", probe,
+             value_len, hex_bytes.c_str());
+    return;
+  }
+  // The threshold characteristic holds two 16-bit little-endian fields:
+  // bytes[0:2] = low-alarm threshold (the app always disables this, writing
+  //              the UNPLUGGED_PROBE_CONSTANT sentinel), and
+  // bytes[2:4] = high-alarm threshold, i.e. the actual target temperature.
+  uint16_t low_raw = (raw_value[1] << 8) | raw_value[0];
+  uint16_t high_raw = (raw_value[3] << 8) | raw_value[2];
+  ESP_LOGD(TAG, "Parsing threshold from probe %d, raw bytes: %s (low=%d, high/target=%d)", probe, hex_bytes.c_str(),
+           low_raw, high_raw);
   if (this->threshold_numbers_[probe] != nullptr) {
-    if (raw_threshold == UNPLUGGED_PROBE_CONSTANT) {
+    if (high_raw == UNPLUGGED_PROBE_CONSTANT) {
       // No target temperature currently stored on the device for this probe
       // (never set via the app or over BLE). Publish NAN so it shows as
       // "unknown" rather than the raw sentinel value.
       this->threshold_numbers_[probe]->publish_state(NAN);
     } else {
-      this->threshold_numbers_[probe]->publish_state((float) raw_threshold);
+      this->threshold_numbers_[probe]->publish_state((float) high_raw);
     }
   }
 }
@@ -320,9 +337,19 @@ void IGrill::write_threshold(int probe_num, float value) {
     ESP_LOGW(TAG, "Not connected to iGrill, can't write threshold for probe %d", probe_num);
     return;
   }
-  uint16_t raw = (uint16_t) value;
-  uint8_t payload[2] = {(uint8_t) (raw & 0xFF), (uint8_t) ((raw >> 8) & 0xFF)};
-  ESP_LOGD(TAG, "Writing threshold %d to probe %d (handle 0x%x)", raw, probe_num, handle);
+  // Matches the official app's payload format: two 16-bit little-endian
+  // fields. The low-alarm threshold is always disabled (sentinel value),
+  // and the high-alarm threshold carries the actual target temperature.
+  uint16_t low_raw = UNPLUGGED_PROBE_CONSTANT;
+  uint16_t high_raw = (uint16_t) value;
+  uint8_t payload[4] = {
+      (uint8_t) (low_raw & 0xFF),
+      (uint8_t) ((low_raw >> 8) & 0xFF),
+      (uint8_t) (high_raw & 0xFF),
+      (uint8_t) ((high_raw >> 8) & 0xFF),
+  };
+  ESP_LOGD(TAG, "Writing threshold %d to probe %d (handle 0x%x), payload: %02X %02X %02X %02X", high_raw, probe_num,
+           handle, payload[0], payload[1], payload[2], payload[3]);
   auto status =
       esp_ble_gattc_write_char(this->parent()->get_gattc_if(), this->parent()->get_conn_id(), handle, sizeof(payload),
                                payload, ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
