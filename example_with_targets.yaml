@@ -1,0 +1,50 @@
+# Example: iGrill V3 with 4 probes, reading temps + battery,
+# and reading/WRITING each probe's alarm/target temperature.
+#
+# Setting the number entities below (e.g. from Home Assistant, or from
+# `number.set_value` in an ESPHome automation) writes the value straight to
+# the iGrill over BLE, which is what makes the grill's own buzzer go off
+# when that probe reaches the target.
+
+external_components:
+  - source: components   # local path to this patched components/ folder
+    # (once you've tested it, you can instead point this at your own fork:
+    #  - source: github://yourname/esphome-igrill@main )
+
+esp32_ble_tracker:
+
+ble_client:
+  - mac_address: 70:91:8F:XX:XX:XX
+    id: igrill_v3
+
+sensor:
+  - platform: igrill
+    ble_client_id: igrill_v3
+    id: igrill_v3_component      # <-- give the igrill component an explicit id
+    update_interval: 30s
+    battery_level:
+      name: "IGrill V3 battery"
+    temperature_probe1:
+      name: "IGrill V3 temp probe 1"
+    temperature_probe2:
+      name: "IGrill V3 temp probe 2"
+    temperature_probe3:
+      name: "IGrill V3 temp probe 3"
+    temperature_probe4:
+      name: "IGrill V3 temp probe 4"
+
+number:
+  - platform: igrill
+    igrill_id: igrill_v3_component
+    temperature_threshold_probe1:
+      name: "IGrill V3 target probe 1"
+      # optional overrides (defaults shown):
+      # min_value: 0
+      # max_value: 300
+      # step: 1
+    temperature_threshold_probe2:
+      name: "IGrill V3 target probe 2"
+    temperature_threshold_probe3:
+      name: "IGrill V3 target probe 3"
+    temperature_threshold_probe4:
+      name: "IGrill V3 target probe 4"
