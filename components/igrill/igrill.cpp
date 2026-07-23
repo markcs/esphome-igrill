@@ -79,6 +79,16 @@ void IGrill::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc
         ESP_LOGD(TAG, "Authentication complete");
         request_temp_unit_read_();
         break;
+      } else {
+        // Any other successful write (e.g. a threshold/target temperature
+        // write) lands here. IMPORTANT: this must break out of the switch.
+        // esp_ble_gattc_cb_param_t is a C union - param->write and
+        // param->read overlap the same memory. Falling through into the
+        // ESP_GATTC_READ_CHAR_EVT case below (as upstream did) reinterprets
+        // uninitialized write-event memory as a read-event's value pointer,
+        // which crashes (LoadProhibited) as soon as it's dereferenced.
+        ESP_LOGD(TAG, "Write completed successfully for handle 0x%x", param->write.handle);
+        break;
       }
     }
 
@@ -285,7 +295,14 @@ void IGrill::read_threshold_(uint8_t *raw_value, uint16_t value_len, int probe) 
   uint16_t raw_threshold = (raw_value[1] << 8) | raw_value[0];
   ESP_LOGV(TAG, "Parsing threshold from probe %d, raw value %d", probe, raw_threshold);
   if (this->threshold_numbers_[probe] != nullptr) {
-    this->threshold_numbers_[probe]->publish_state((float) raw_threshold);
+    if (raw_threshold == UNPLUGGED_PROBE_CONSTANT) {
+      // No target temperature currently stored on the device for this probe
+      // (never set via the app or over BLE). Publish NAN so it shows as
+      // "unknown" rather than the raw sentinel value.
+      this->threshold_numbers_[probe]->publish_state(NAN);
+    } else {
+      this->threshold_numbers_[probe]->publish_state((float) raw_threshold);
+    }
   }
 }
 
